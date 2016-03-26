@@ -346,6 +346,12 @@ static Reg ra_rematk(ASMState *as, IRRef ref)
 #if LJ_64
   } else if (ir->o == IR_KINT64) {
     emit_loadu64(as, r, ir_kint64(ir)->u64);
+#if LJ_GC64
+  } else if (ir->o == IR_KGC) {
+    emit_loadu64(as, r, (uintptr_t)ir_kgc(ir));
+  } else if (ir->o == IR_KPTR || ir->o == IR_KKPTR) {
+    emit_loadu64(as, r, (uintptr_t)ir_kptr(ir));
+#endif
 #endif
   } else {
     lua_assert(ir->o == IR_KINT || ir->o == IR_KGC ||
@@ -1929,8 +1935,12 @@ static void asm_tail_link(ASMState *as)
       if (bc_isret(bc_op(*retpc)))
 	pc = retpc;
     }
+#if LJ_GC64
+    emit_loadu64(as, RID_LPC, u64ptr(pc));
+#else
     ra_allockreg(as, i32ptr(J2GG(as->J)->dispatch), RID_DISPATCH);
     ra_allockreg(as, i32ptr(pc), RID_LPC);
+#endif
     mres = (int32_t)(snap->nslots - baseslot - LJ_FR2);
     switch (bc_op(*pc)) {
     case BC_CALLM: case BC_CALLMT:
@@ -1944,7 +1954,7 @@ static void asm_tail_link(ASMState *as)
     /* Save modified BASE for linking to trace with higher start frame. */
     emit_setgl(as, RID_BASE, jit_base);
   }
-  emit_addptr(as, RID_BASE, 8*(int32_t)baseslot);
+  emit_addptr(as, RID_BASE|REX_GC64, 8*(int32_t)baseslot);
 
   /* Sync the interpreter state with the on-trace state. */
   asm_stack_restore(as, snap);
@@ -2282,6 +2292,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->curins = as->T->snap[0].ref;
     asm_snap_prep(as);  /* The GC check is a guard. */
     asm_gc_check(as);
+    as->curins = as->stopins;
   }
   ra_evictk(as);
   if (as->parent)
